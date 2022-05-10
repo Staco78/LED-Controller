@@ -1,3 +1,4 @@
+import assert from "assert";
 import { ReadlineParser, SerialPort } from "serialport";
 
 const MAGIC = 0xab;
@@ -12,9 +13,8 @@ interface Packet {
 
 namespace Data {
     let _port: SerialPort;
-    let lastColor: string;
-    let colorIsUpdating: boolean = false;
-    let _color: string = "#FFFFFF";
+    let packetToSend: Packet | null = null;
+    let isSendingPacket = false;
 
     export function setPort(port: SerialPort) {
         _port = port;
@@ -24,12 +24,27 @@ namespace Data {
         const parser = _port.pipe(new ReadlineParser());
         parser.on("data", console.log);
 
-        updateColor();
+        isSendingPacket = false;
     }
 
     export function setColor(color: string) {
-        _color = color;
-        if (!colorIsUpdating) updateColor();
+        pushPacket(
+            createPacket(
+                0,
+                0,
+                Buffer.from([
+                    parseInt(color.substring(1, 3), 16),
+                    parseInt(color.substring(3, 5), 16),
+                    parseInt(color.substring(5, 7), 16),
+                ])
+            )
+        );
+
+        if (!isSendingPacket) updateData();
+    }
+
+    function pushPacket(packet: Packet) {
+        packetToSend = packet;
     }
 
     function createPacket(action: number, subAction: number, data: Buffer): Packet {
@@ -59,18 +74,14 @@ namespace Data {
         });
     }
 
-    async function updateColor() {
-        colorIsUpdating = true;
-        lastColor = _color;
-        const data = Buffer.from([
-            parseInt(_color.substring(1, 3), 16),
-            parseInt(_color.substring(3, 5), 16),
-            parseInt(_color.substring(5, 7), 16),
-        ]);
-        const packet = createPacket(0, 0, data);
-        await sendPacket(packet);
-        if (lastColor !== _color) updateColor();
-        else colorIsUpdating = false;
+    async function updateData() {
+        isSendingPacket = true;
+        if (packetToSend) {
+            const packet = packetToSend;
+            packetToSend = null;
+            await sendPacket(packet);
+            updateData();
+        } else isSendingPacket = false;
     }
 }
 
